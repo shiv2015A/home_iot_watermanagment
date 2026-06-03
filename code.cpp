@@ -1,40 +1,47 @@
 /*
-  IoT Home Automation + Water Leakage Detection
-  Reconstructed implementation
+====================================================
+SMART HOME AUTOMATION + WATER LEAKAGE DETECTION
+Reconstructed Version
+====================================================
 
-  Hardware:
-  - Arduino Uno
-  - PIR Motion Sensor
-  - LED
-  - 2 x YF-S201 Water Flow Sensors
+Hardware:
+- Arduino Uno
+- PIR Motion Sensor
+- Relay Module
+- 220V AC Bulb
+- 2 x YF-S201 Water Flow Sensors
+
+Author: Shivansh Dubey
+====================================================
 */
 
-const byte FLOW_SENSOR_1 = 2;   // Interrupt 0
-const byte FLOW_SENSOR_2 = 3;   // Interrupt 1
+const int PIR_PIN = 7;
+const int RELAY_PIN = 8;
 
-const byte PIR_PIN = 7;
-const byte LED_PIN = 13;
+const int FLOW_SENSOR_IN = 2;   // Interrupt 0
+const int FLOW_SENSOR_OUT = 3;  // Interrupt 1
 
-volatile unsigned long pulseCount1 = 0;
-volatile unsigned long pulseCount2 = 0;
+volatile unsigned long pulseCountIn = 0;
+volatile unsigned long pulseCountOut = 0;
+
+float totalVolumeIn = 0;
+float totalVolumeOut = 0;
 
 unsigned long previousMillis = 0;
-const unsigned long interval = 1000; // 1 second
+const unsigned long interval = 1000;
 
-float totalVolume1 = 0.0;
-float totalVolume2 = 0.0;
-
-// YF-S201 calibration
+// YF-S201 Constants
 const float PULSES_PER_LITRE = 450.0;
+const float FLOW_CONSTANT = 7.5;
 
-void countSensor1()
+void countIn()
 {
-    pulseCount1++;
+    pulseCountIn++;
 }
 
-void countSensor2()
+void countOut()
 {
-    pulseCount2++;
+    pulseCountOut++;
 }
 
 void setup()
@@ -42,37 +49,48 @@ void setup()
     Serial.begin(9600);
 
     pinMode(PIR_PIN, INPUT);
-    pinMode(LED_PIN, OUTPUT);
 
-    pinMode(FLOW_SENSOR_1, INPUT_PULLUP);
-    pinMode(FLOW_SENSOR_2, INPUT_PULLUP);
+    pinMode(RELAY_PIN, OUTPUT);
+    digitalWrite(RELAY_PIN, LOW);
 
-    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_1), countSensor1, RISING);
-    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_2), countSensor2, RISING);
+    pinMode(FLOW_SENSOR_IN, INPUT_PULLUP);
+    pinMode(FLOW_SENSOR_OUT, INPUT_PULLUP);
 
-    Serial.println("System Started");
+    attachInterrupt(
+        digitalPinToInterrupt(FLOW_SENSOR_IN),
+        countIn,
+        RISING);
+
+    attachInterrupt(
+        digitalPinToInterrupt(FLOW_SENSOR_OUT),
+        countOut,
+        RISING);
+
+    Serial.println("=================================");
+    Serial.println("SYSTEM INITIALIZED");
+    Serial.println("=================================");
 }
 
 void loop()
 {
-    // --------------------------
-    // Motion Detection
-    // --------------------------
+    //-------------------------------------------------
+    // HOME AUTOMATION
+    //-------------------------------------------------
 
     int motion = digitalRead(PIR_PIN);
 
     if (motion == HIGH)
     {
-        digitalWrite(LED_PIN, HIGH);
+        digitalWrite(RELAY_PIN, HIGH);
     }
     else
     {
-        digitalWrite(LED_PIN, LOW);
+        digitalWrite(RELAY_PIN, LOW);
     }
 
-    // --------------------------
-    // Flow Monitoring
-    // --------------------------
+    //-------------------------------------------------
+    // FLOW MONITORING
+    //-------------------------------------------------
 
     unsigned long currentMillis = millis();
 
@@ -82,56 +100,100 @@ void loop()
 
         noInterrupts();
 
-        unsigned long pulses1 = pulseCount1;
-        unsigned long pulses2 = pulseCount2;
+        unsigned long pulsesIn = pulseCountIn;
+        unsigned long pulsesOut = pulseCountOut;
 
-        pulseCount1 = 0;
-        pulseCount2 = 0;
+        pulseCountIn = 0;
+        pulseCountOut = 0;
 
         interrupts();
 
-        // Flow rate calculation
-        float flowRate1 = pulses1 / 7.5; // L/min
-        float flowRate2 = pulses2 / 7.5; // L/min
+        //-------------------------------------------------
+        // Instantaneous Flow Rate
+        //-------------------------------------------------
 
-        // Volume calculation
-        float litres1 = pulses1 / PULSES_PER_LITRE;
-        float litres2 = pulses2 / PULSES_PER_LITRE;
+        float flowRateIn =
+            pulsesIn / FLOW_CONSTANT;
 
-        totalVolume1 += litres1;
-        totalVolume2 += litres2;
+        float flowRateOut =
+            pulsesOut / FLOW_CONSTANT;
 
-        float leakAmount = totalVolume1 - totalVolume2;
+        //-------------------------------------------------
+        // Volume Calculation
+        //-------------------------------------------------
 
-        Serial.println("--------------------------------");
+        float litresIn =
+            pulsesIn / PULSES_PER_LITRE;
 
-        Serial.print("Flow Rate 1: ");
-        Serial.print(flowRate1);
+        float litresOut =
+            pulsesOut / PULSES_PER_LITRE;
+
+        totalVolumeIn += litresIn;
+        totalVolumeOut += litresOut;
+
+        //-------------------------------------------------
+        // Leak Detection
+        //-------------------------------------------------
+
+        float volumeDifference =
+            totalVolumeIn - totalVolumeOut;
+
+        //-------------------------------------------------
+        // Serial Monitor Output
+        //-------------------------------------------------
+
+        Serial.println();
+        Serial.println("---------- WATER DATA ----------");
+
+        Serial.print("Flow Rate In : ");
+        Serial.print(flowRateIn);
         Serial.println(" L/min");
 
-        Serial.print("Flow Rate 2: ");
-        Serial.print(flowRate2);
+        Serial.print("Flow Rate Out: ");
+        Serial.print(flowRateOut);
         Serial.println(" L/min");
 
         Serial.print("Total Volume In : ");
-        Serial.print(totalVolume1);
+        Serial.print(totalVolumeIn);
         Serial.println(" L");
 
         Serial.print("Total Volume Out: ");
-        Serial.print(totalVolume2);
+        Serial.print(totalVolumeOut);
         Serial.println(" L");
 
-        Serial.print("Estimated Loss: ");
-        Serial.print(leakAmount);
+        Serial.print("Water Loss: ");
+        Serial.print(volumeDifference);
         Serial.println(" L");
 
-        if (leakAmount > 0.5)
+        //-------------------------------------------------
+        // Leak Decision
+        //-------------------------------------------------
+
+        if (volumeDifference > 0.25)
         {
-            Serial.println("WARNING: Possible Leak Detected");
+            Serial.println("ALERT: POSSIBLE LEAK DETECTED");
         }
         else
         {
-            Serial.println("System Status: Normal");
+            Serial.println("STATUS: NORMAL");
         }
+
+        //-------------------------------------------------
+        // Motion Status
+        //-------------------------------------------------
+
+        Serial.println();
+        Serial.print("Motion Status: ");
+
+        if (motion)
+        {
+            Serial.println("DETECTED");
+        }
+        else
+        {
+            Serial.println("NO MOTION");
+        }
+
+        Serial.println("-------------------------------");
     }
 }
